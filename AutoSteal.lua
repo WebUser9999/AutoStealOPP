@@ -1,7 +1,7 @@
--- FlyBase Stealth+++ (versão otimizada)
--- • Mais rápido (ajustei MIN_SPEED e MAX_SPEED, mantendo suavização)
--- • Minimizar/Maximizar 100% funcional
--- • Ao minimizar: mostra só barra com título e botão "Maximizar +"
+-- FlyBase Stealth+++ (corrigido)
+-- • Só 1 slot extra (Slot 1) — removidos Slot 2 e 3
+-- • Botão Minimizar/Maximizar na barra de título
+-- • Voo Stealth replicado (waypoints + velocity), anti-reset ativo
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -14,9 +14,9 @@ local player = Players.LocalPlayer
 local HOLD_SECONDS   = 5
 local POST_SPAWN_PIN = 1.2
 local WAYPOINT_DIST  = 16
-local MAX_SPEED      = 120  -- velocidade máx (↑ mais rápido, mas natural)
-local MIN_SPEED      = 60   -- velocidade mín (↑ mais rápido, mas natural)
-local ACCEL_FACTOR   = 0.20 -- suavização
+local MAX_SPEED      = 70
+local MIN_SPEED      = 28
+local ACCEL_FACTOR   = 0.18
 local OBST_CHECK_DIST= 8
 local OBST_UP_STEP   = 6
 
@@ -25,7 +25,7 @@ local KEY_SET        = Enum.KeyCode.G
 local KEY_TOGGLE_RESP= Enum.KeyCode.R
 local KEY_SLOT_1     = Enum.KeyCode.One
 
--- Estado
+-- Estado global
 getgenv().FlyBaseUltimate = getgenv().FlyBaseUltimate or {
     savedCFrame = nil,
     slot1 = nil,
@@ -48,10 +48,10 @@ local function getHRP(c) c=c or getChar(); return c:WaitForChild("HumanoidRootPa
 local function getHumanoid(c) c=c or getChar(); return c:WaitForChild("Humanoid") end
 
 local function groundAt(pos)
-    local rp=RaycastParams.new()
+    local rp = RaycastParams.new()
     rp.FilterDescendantsInstances={player.Character}
     rp.FilterType=Enum.RaycastFilterType.Blacklist
-    local hit=Workspace:Raycast(pos+Vector3.new(0,12,0),Vector3.new(0,-1000,0),rp)
+    local hit = Workspace:Raycast(pos+Vector3.new(0,12,0),Vector3.new(0,-1000,0),rp)
     return hit and Vector3.new(pos.X,hit.Position.Y+2,pos.Z) or pos
 end
 
@@ -75,12 +75,16 @@ end) end
 local function unhookReset() pcall(function() StarterGui:SetCore("ResetButtonCallback",true) end) end
 local function enableAnti()
     if Anti.active then return end
-    Anti.active=true; hookReset()
-    local hum=getHumanoid(); hum.BreakJointsOnDeath=false; hum:SetStateEnabled(Enum.HumanoidStateType.Dead,false)
+    Anti.active=true
+    hookReset()
+    local hum=getHumanoid()
+    hum.BreakJointsOnDeath=false
+    hum:SetStateEnabled(Enum.HumanoidStateType.Dead,false)
 end
 local function disableAnti()
     if not Anti.active then return end
-    Anti.active=false; unhookReset()
+    Anti.active=false
+    unhookReset()
     local hum=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum:SetStateEnabled(Enum.HumanoidStateType.Dead,true) end
 end
@@ -109,18 +113,9 @@ local function flyToBase()
         end
         local dir=(wpTarget-hrp.Position).Unit
         local spd=MIN_SPEED+(MAX_SPEED-MIN_SPEED)*math.random()
-        hrp.AssemblyLinearVelocity=hrp.AssemblyLinearVelocity:Lerp(dir*spd,ACCEL_FACTOR)
+        local vel=dir*spd
+        hrp.AssemblyLinearVelocity=hrp.AssemblyLinearVelocity:Lerp(vel,ACCEL_FACTOR)
         if uiStatus then uiStatus.Text=string.format("Dist: %.1f",(target-hrp.Position).Magnitude) end
-    end)
-end
-
--- Respawn
-local function postSpawnPin(char)
-    if not(state.autoRespawn and state.savedCFrame) then return end
-    task.defer(function()
-        local hrp=char:WaitForChild("HumanoidRootPart")
-        local g=groundAt(state.savedCFrame.Position)
-        hrp.CFrame=CFrame.new(g); hardLockTo(g,POST_SPAWN_PIN)
     end)
 end
 
@@ -204,17 +199,11 @@ local function buildUI()
     minBtn.MouseButton1Click:Connect(function()
         minimized=not minimized
         for _,child in ipairs(frame:GetChildren()) do
-            if child~=titleBar and child~=stroke then
-                child.Visible=not minimized
-            end
+            if child~=titleBar and child~=stroke then child.Visible=not minimized end
         end
-        if minimized then
-            minBtn.Text="Maximizar +"
-        else
-            minBtn.Text="—"
-        end
+        minBtn.Text=minimized and "+" or "—"
     end)
 end
 
 buildUI()
-notify("FlyBase Stealth+++ carregado — mais rápido e com minimizar/maximizar funcional")
+notify("FlyBase Stealth+++ carregado — agora só Slot 1 e botão de minimizar na barra de título")
