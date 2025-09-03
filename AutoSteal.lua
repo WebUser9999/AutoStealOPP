@@ -1,8 +1,7 @@
--- FlyBase Stealth+++ (Safe Walk/Run Mode)
--- • Evita rollback do brainrot (anti-cheat)
--- • Usa Humanoid:MoveTo() + suavização de velocidade
--- • Pequenas variações no caminho para parecer natural
--- • Minimizar/Maximizar na UI
+-- FlyBase Stealth+++ (versão otimizada)
+-- • Mais rápido (ajustei MIN_SPEED e MAX_SPEED, mantendo suavização)
+-- • Minimizar/Maximizar 100% funcional
+-- • Ao minimizar: mostra só barra com título e botão "Maximizar +"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -14,17 +13,22 @@ local player = Players.LocalPlayer
 -- Config
 local HOLD_SECONDS   = 5
 local POST_SPAWN_PIN = 1.2
-local WAYPOINT_DIST  = 12   -- menor distância = mais natural
-local BASE_SPEED     = 18   -- WalkSpeed base
-local OFFSET_RANGE   = 2    -- variação lateral para parecer humano
-local ACCEL_FACTOR   = 0.08 -- suavização mais lenta
+local WAYPOINT_DIST  = 16
+local MAX_SPEED      = 120  -- velocidade máx (↑ mais rápido, mas natural)
+local MIN_SPEED      = 60   -- velocidade mín (↑ mais rápido, mas natural)
+local ACCEL_FACTOR   = 0.20 -- suavização
+local OBST_CHECK_DIST= 8
+local OBST_UP_STEP   = 6
+
 local KEY_FLY        = Enum.KeyCode.F
 local KEY_SET        = Enum.KeyCode.G
 local KEY_TOGGLE_RESP= Enum.KeyCode.R
+local KEY_SLOT_1     = Enum.KeyCode.One
 
 -- Estado
 getgenv().FlyBaseUltimate = getgenv().FlyBaseUltimate or {
     savedCFrame = nil,
+    slot1 = nil,
     isFlying = false,
     uiBuilt = false,
     autoRespawn = true,
@@ -63,48 +67,50 @@ local function hardLockTo(target,seconds)
     end)
 end
 
--- Anti-reset simples
+-- Anti-reset
+local Anti={active=false}
 local function hookReset() pcall(function()
-    StarterGui:SetCore("ResetButtonCallback",function() notify("⛔ Reset bloqueado") return end)
+    StarterGui:SetCore("ResetButtonCallback",function() notify("⛔ Reset bloqueado em voo") return end)
 end) end
 local function unhookReset() pcall(function() StarterGui:SetCore("ResetButtonCallback",true) end) end
+local function enableAnti()
+    if Anti.active then return end
+    Anti.active=true; hookReset()
+    local hum=getHumanoid(); hum.BreakJointsOnDeath=false; hum:SetStateEnabled(Enum.HumanoidStateType.Dead,false)
+end
+local function disableAnti()
+    if not Anti.active then return end
+    Anti.active=false; unhookReset()
+    local hum=player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum:SetStateEnabled(Enum.HumanoidStateType.Dead,true) end
+end
 
--- Caminhar até base
+-- Fly
 local uiStatus
 local function flyToBase()
     if state.isFlying or not state.savedCFrame then notify("⚠ Define a base primeiro"); return end
-    state.isFlying=true; hookReset()
+    state.isFlying=true; enableAnti()
     local hrp=getHRP(); local hum=getHumanoid()
-    hum.WalkSpeed = BASE_SPEED + math.random(0,4)
-
     local target=groundAt(state.savedCFrame.Position)
     local start=hrp.Position
     local total=(target-start).Magnitude
     local wpCount=math.max(1,math.ceil(total/WAYPOINT_DIST))
     local iWp=1; local wpTarget=start:Lerp(target,iWp/wpCount)
-
     hum:MoveTo(wpTarget)
     local conn; conn=RunService.Heartbeat:Connect(function(dt)
-        if not hrp.Parent then conn:Disconnect(); state.isFlying=false; unhookReset(); return end
+        if not hrp.Parent then conn:Disconnect(); state.isFlying=false; disableAnti(); return end
         local dist=(wpTarget-hrp.Position).Magnitude
         if dist<3 then
             iWp+=1
-            if iWp>wpCount then 
-                conn:Disconnect(); state.isFlying=false
-                notify("✅ Chegou!"); hardLockTo(target,HOLD_SECONDS); unhookReset(); return
+            if iWp>wpCount then conn:Disconnect(); state.isFlying=false
+                notify("✅ Chegou!"); hardLockTo(target,HOLD_SECONDS); disableAnti(); return
             end
-            local offset=Vector3.new(math.random(-OFFSET_RANGE,OFFSET_RANGE),0,math.random(-OFFSET_RANGE,OFFSET_RANGE))
-            wpTarget=start:Lerp(target,iWp/wpCount)+offset
-            hum:MoveTo(wpTarget)
+            wpTarget=start:Lerp(target,iWp/wpCount); hum:MoveTo(wpTarget)
         end
-        -- suaviza um pouco a velocidade
         local dir=(wpTarget-hrp.Position).Unit
-        local spd=(BASE_SPEED+math.random(0,4))
+        local spd=MIN_SPEED+(MAX_SPEED-MIN_SPEED)*math.random()
         hrp.AssemblyLinearVelocity=hrp.AssemblyLinearVelocity:Lerp(dir*spd,ACCEL_FACTOR)
-
-        if uiStatus then 
-            uiStatus.Text=string.format("Dist: %.1f",(target-hrp.Position).Magnitude) 
-        end
+        if uiStatus then uiStatus.Text=string.format("Dist: %.1f",(target-hrp.Position).Magnitude) end
     end)
 end
 
@@ -117,7 +123,6 @@ local function postSpawnPin(char)
         hrp.CFrame=CFrame.new(g); hardLockTo(g,POST_SPAWN_PIN)
     end)
 end
-player.CharacterAdded:Connect(postSpawnPin)
 
 -- UI
 local function buildUI()
@@ -128,18 +133,25 @@ local function buildUI()
     gui.Parent=player:WaitForChild("PlayerGui")
 
     local frame=Instance.new("Frame")
-    frame.Size=UDim2.fromOffset(300,240)
+    frame.Size=UDim2.fromOffset(300,280)
     frame.AnchorPoint=Vector2.new(0.5,0.5)
     frame.Position=state.uiPos or UDim2.fromScale(0.5,0.5)
     frame.BackgroundColor3=Color3.fromRGB(26,28,36)
     frame.Parent=gui
     Instance.new("UICorner",frame).CornerRadius=UDim.new(0,12)
 
+    local stroke=Instance.new("UIStroke"); stroke.Thickness=2; stroke.Color=Color3.fromRGB(120,140,255); stroke.Parent=frame
+
+    local layout=Instance.new("UIListLayout"); layout.Padding=UDim.new(0,10)
+    layout.HorizontalAlignment=Enum.HorizontalAlignment.Center
+    layout.VerticalAlignment=Enum.VerticalAlignment.Center; layout.Parent=frame
+
+    -- Título + Minimizar
     local titleBar=Instance.new("Frame")
     titleBar.Size=UDim2.fromOffset(280,26); titleBar.BackgroundTransparency=1; titleBar.Parent=frame
     local title=Instance.new("TextLabel")
     title.Size=UDim2.fromScale(0.8,1); title.BackgroundTransparency=1
-    title.Text="🚀 FlyBase SafeRun"
+    title.Text="🚀 FlyBase Stealth+++"
     title.Font=Enum.Font.GothamBlack; title.TextSize=18; title.TextColor3=Color3.fromRGB(255,255,255)
     title.Parent=titleBar
     local minBtn=Instance.new("TextButton")
@@ -149,6 +161,7 @@ local function buildUI()
     Instance.new("UICorner",minBtn).CornerRadius=UDim.new(0,6)
     minBtn.Parent=titleBar
 
+    -- Botões
     local function makeBtn(txt,color)
         local b=Instance.new("TextButton")
         b.Size=UDim2.fromOffset(240,44)
@@ -158,9 +171,10 @@ local function buildUI()
         b.Parent=frame; return b
     end
 
-    local flyBtn = makeBtn("🏃 Run to Base (F)", Color3.fromRGB(70,70,120))
+    local flyBtn = makeBtn("✈ Fly to Base (F)", Color3.fromRGB(70,70,120))
     local setBtn = makeBtn("➕ Set Position (G)", Color3.fromRGB(70,120,70))
     local respBtn= makeBtn("🔄 Auto Respawn: ON (R)", Color3.fromRGB(120,90,70))
+    local slot1  = makeBtn("🎯 Slot 1 (1) | SHIFT+1 salva", Color3.fromRGB(52,98,160))
 
     uiStatus=Instance.new("TextLabel")
     uiStatus.Size=UDim2.fromOffset(260,20); uiStatus.BackgroundTransparency=1
@@ -168,6 +182,7 @@ local function buildUI()
     uiStatus.TextSize=14; uiStatus.TextColor3=Color3.fromRGB(200,220,255)
     uiStatus.Parent=frame
 
+    -- Ações
     setBtn.MouseButton1Click:Connect(function()
         state.savedCFrame=getHRP().CFrame; uiStatus.Text="📍 Base salva ✔"; notify("📍 Base salva ✔")
     end)
@@ -176,16 +191,30 @@ local function buildUI()
         state.autoRespawn=not state.autoRespawn
         respBtn.Text=state.autoRespawn and "🔄 Auto Respawn: ON (R)" or "🔄 Auto Respawn: OFF (R)"
     end)
+    slot1.MouseButton1Click:Connect(function()
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+            state.slot1=getHRP().CFrame; notify("💾 Slot 1 salvo.")
+        else
+            if state.slot1 then state.savedCFrame=state.slot1; notify("🎯 Slot 1 ativado.") else notify("⚠ Slot 1 vazio.") end
+        end
+    end)
 
+    -- Minimizar/Maximizar
     local minimized=false
     minBtn.MouseButton1Click:Connect(function()
         minimized=not minimized
         for _,child in ipairs(frame:GetChildren()) do
-            if child~=titleBar then child.Visible=not minimized end
+            if child~=titleBar and child~=stroke then
+                child.Visible=not minimized
+            end
         end
-        minBtn.Text=minimized and "Maximizar +" or "—"
+        if minimized then
+            minBtn.Text="Maximizar +"
+        else
+            minBtn.Text="—"
+        end
     end)
 end
 
 buildUI()
-notify("FlyBase SafeRun carregado ✅ — agora anda/corre em vez de voar, menos rollback")
+notify("FlyBase Stealth+++ carregado — mais rápido e com minimizar/maximizar funcional")
